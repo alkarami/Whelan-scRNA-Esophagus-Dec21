@@ -59,6 +59,7 @@ rm(old0510M,old2,old3,old4F,old5M,old6F,
    young0510M,young2F,young3F,young4M,young5M,young6F)
 
 ## Perform integration pipeline
+dir.create('Nature_scRNA_Aging_Figs')
 features.aging <- SelectIntegrationFeatures(object.list = combined.files)
 save(features.aging, file = 'Nature_scRNA_Aging_Files/features.aging')
 anchors.aging <- FindIntegrationAnchors(object.list = combined.files, anchor.features = features.aging)
