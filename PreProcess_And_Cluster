@@ -1,0 +1,241 @@
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(reshape)
+library(ggpubr)
+library(plyr)
+
+## Get the files
+trimmed.files <- list()
+for(x in list.files('Nature_scRNA_Aging_Trimmed', full.names = T)){
+  y <- Read10X(x)
+  pname <- strsplit(x,'/')[[1]][2]
+  pname <- strsplit(pname,'_')[[1]][1]
+  pname <- strsplit(pname,'-')[[1]][1]
+  y <- CreateSeuratObject(y, project = pname)
+  y <- PercentageFeatureSet(y, pattern = "mt-", col.name = "percent.mt")
+  print(paste(ncol(y),'cells','in',pname,sep = ' '))
+  trimmed.files <- append(trimmed.files,y)
+}
+
+## Print out .txt's for GEO submission
+for(x in trimmed.files){
+  fn <- paste('Nature_scRNA_Aging_Trimmed/',
+              x@project.name,'.txt',sep = '')
+  write.table(GetAssayData(x),
+              file = fn)
+}
+
+## Merge technical replicates into their respective biological samples
+
+old0510M <- merge(trimmed.files[[1]],trimmed.files[2:4])
+old2F <- merge(trimmed.files[[5]],trimmed.files[6:8])
+old3M <- merge(trimmed.files[[9]],trimmed.files[10:12])
+old4F <- merge(trimmed.files[[13]],trimmed.files[14:16])
+old5M <- merge(trimmed.files[[17]],trimmed.files[18:19])
+old6F <- merge(trimmed.files[[20]],trimmed.files[21:23])
+young0510M <- merge(trimmed.files[[24]],trimmed.files[25:27])
+young2F <- merge(trimmed.files[[28]],trimmed.files[29:31])
+young3F <- merge(trimmed.files[[32]],trimmed.files[33:35])
+young4M <- merge(trimmed.files[[36]],trimmed.files[37:39])
+young5M <- merge(trimmed.files[[40]],trimmed.files[41:43])
+young6F <- merge(trimmed.files[[44]],trimmed.files[45:47])
+rm(trimmed.files)
+
+## Make a list of combined files
+combined.files <- list(old0510M,old2F,old3M,old4F,old5M,old6F,
+                       young0510M,young2F,young3F,young4M,young5M,young6F)
+
+## Preprocess the combined files
+for(x in 1:12){
+  y <- combined.files[[x]]
+  y <- subset(y, subset = percent.mt < 10)
+  y <- NormalizeData(y, verbose = F)
+  y <- FindVariableFeatures(y, selection.method = 'vst', nfeatures = 2000)
+  combined.files[[x]] <- y
+}
+rm(old0510M,old2,old3,old4F,old5M,old6F,
+   young0510M,young2F,young3F,young4M,young5M,young6F)
+
+## Perform integration pipeline
+features.aging <- SelectIntegrationFeatures(object.list = combined.files)
+save(features.aging, file = 'Nature_scRNA_Aging_Files/features.aging')
+anchors.aging <- FindIntegrationAnchors(object.list = combined.files, anchor.features = features.aging)
+save(anchors.aging, file = 'Nature_scRNA_Aging_Files/anchors.aging')
+aging.combined <- IntegrateData(anchorset = anchors.aging)
+save(aging.combined, file = 'Nature_scRNA_Aging_Files/aging.combined')
+
+DefaultAssay(aging.combined) <- "integrated"
+
+aging.combined <- ScaleData(aging.combined, verbose = FALSE)
+aging.combined <- RunPCA(aging.combined, npcs = 30, verbose = FALSE)
+aging.combined <- RunUMAP(aging.combined, reduction = "pca", dims = 1:20)
+aging.combined <- FindNeighbors(aging.combined, reduction = "pca", dims = 1:20)
+aging.combined <- FindClusters(aging.combined, resolution = 0.2)
+save(aging.combined, file = 'Nature_scRNA_Aging_Files/aging.combined')
+
+## Create initial clustering figures
+dir.create('Nature_scRNA_Aging_Figs')
+p <- DimPlot(aging.combined, split.by = "Age", label = T)
+ggsave('Nature_scRNA_Aging_Figs/Clusters.jpg',plot = p)
+aging.combined <- ProjectDim(aging.combined, reduction = 'umap')
+p <- DimHeatmap(object = aging.combined, reduction = 'umap', projected = T, dims = 1, cells = 1000, balanced = T, fast = F)
+ggsave('Nature_scRNA_Aging_Figs/DimHeatmap_1.jpg',plot = p)
+p <- DimHeatmap(object = aging.combined, reduction = 'umap', projected = T, dims = 2, cells = 1000, balanced = T, fast = F)
+ggsave('Nature_scRNA_Aging_Figs/DimHeatmap_2.jpg',plot = p)
+
+## Update relevant metadata
+aging.combined[['Mouse']] <- substr(aging.combined$orig.ident,1,
+                                    nchar(aging.combined$orig.ident)-1)
+aging.combined[['Age']] <- revalue(aging.combined$Mouse, replace = 
+                                     c('old0510M' = 'Aged','old2F' = 'Aged',
+                                       'old3M' = 'Aged','old4F' = 'Aged',
+                                       'old5M' = 'Aged','old6F' = 'Aged',
+                                       'young0510M' = 'Young','young2F' = 'Young',
+                                       'young3F' = 'Young','young4M' = 'Young',
+                                       'young5M' = 'Young','young6F' = 'Young'
+                                     ))
+aging.combined[['Sex']] <- revalue(aging.combined$Mouse, replace = 
+                                     c('old0510M' = 'M','old2F' = 'F',
+                                       'old3M' = 'M','old4F' = 'F',
+                                       'old5M' = 'M','old6F' = 'F',
+                                       'young0510M' = 'M','young2F' = 'F',
+                                       'young3F' = 'F','young4M' = 'M',
+                                       'young5M' = 'M','young6F' = 'F'
+                                     ))
+
+## Create QC figures
+p <- VlnPlot(aging.combined, features = c('nFeature_RNA'), group.by = 'Mouse', pt.size = 0)
+ggsave('Nature_scRNA_Aging_Figs/QC_nFeatures.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/QC_nFeatures.eps',plot = p)
+p <- VlnPlot(aging.combined, features = c('nCount_RNA'), group.by = 'Mouse', pt.size = 0)
+ggsave('Nature_scRNA_Aging_Figs/QC_nCounts.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/QC_nCounts.eps',plot = p)
+p <- VlnPlot(aging.combined, features = c('percent.mt'), group.by = 'Mouse', pt.size = 0)
+ggsave('Nature_scRNA_Aging_Figs/QC_percentMT.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/QC_percentMT.eps',plot = p)
+p <- DimPlot(aging.epi.clean, group.by = 'Mouse', raster = F)
+ggsave('Nature_scRNA_Aging_Figs/QC_SampleDist.eps',plot = p)
+
+p <- DimPlot(aging.epi.clean, group.by = 'Mouse', raster = F)
+ggsave('Nature_scRNA_Aging_Figs/QC_SampleDist.jpg',plot = p)
+
+aging.epi.clean$Age <- factor(aging.epi.clean$Age, levels = c('Young','Aged'))
+p <- VlnPlot(aging.epi.clean, features = c('nFeature_RNA'), group.by = 'Age', pt.size = 0)
+ggsave('Nature_scRNA_Aging_Figs/QC_nFeatures_Age.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/QC_nFeatures_Age.eps',plot = p)
+p <- VlnPlot(aging.epi.clean, features = c('nCount_RNA'), group.by = 'Age', pt.size = 0)
+ggsave('Nature_scRNA_Aging_Figs/QC_nCounts_Age.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/QC_nCounts_Age.eps',plot = p)
+p <- VlnPlot(aging.epi.clean, features = c('percent.mt'), group.by = 'Age', pt.size = 0)
+ggsave('Nature_scRNA_Aging_Figs/QC_percentMT_Age.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/QC_percentMT_Age.eps',plot = p)
+
+## Get cell cylce scores
+mouses <- str_to_title(cc.genes.updated.2019$s.genes)
+mouseg2m <- str_to_title(cc.genes.updated.2019$g2m.genes)
+DefaultAssay(aging.combined) <- 'RNA'
+aging.combined <- CellCycleScoring(aging.combined, s.features = mouses, g2m.features = mouseg2m)
+p <- DimPlot(aging.combined, group.by = 'Phase')
+ggsave('Nature_scRNA_Aging_Figs/CCPhase.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/CCPhase.eps',plot = p)
+save(aging.combined, file = 'Nature_scRNA_Aging_Files/aging.combined')
+
+## Get cluster markers 
+ac.markers <- FindAllMarkers(aging.combined, group.by = 'seurat_clusters', return.thresh = 0.05, max.cells.per.ident = 5000)
+save(ac.markers, file = 'Nature_scRNA_Aging_Files/ac.markers')
+heatmarkers <-ac.markers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_log2FC) 
+avex <- AverageExpression(aging.combined, assays = 'RNA', return.seurat = T)
+avex <- ScaleData(avex, features = heatmarkers$gene)
+p <- DoHeatmap(avex, features = heatmarkers$gene, label = F, slot = 'scale.data', draw.lines = F, assay = 'RNA')+
+  theme(text = element_text(size = 7.5))
+ggsave('Nature_scRNA_Aging_Figs/ClusterMarkers.jpg',plot = p)
+
+## Figure out epithelial population
+p <- FeaturePlot(aging.combined, features = c('Krt5','Krt14','Krt15','Dst','Col17a1','Ccnd2'))
+ggsave('Nature_scRNA_Aging_Figs/DistBasalMarkers.jpg', plot = p)
+
+## Excise non-epithelial populations and re-cluster
+aging.epi <- subset(aging.combined, idents = c(0,1,2,3,4,5,6,7,8,9,10,14,15))
+DefaultAssay(aging.epi) <- 'integrated'
+aging.epi <- ScaleData(aging.epi)
+aging.epi <- RunPCA(aging.epi, npcs = 30, verbose = FALSE)
+aging.epi <- RunUMAP(aging.epi, reduction = "pca", dims = 1:20, n.neighbors = 20)
+aging.epi <- FindNeighbors(aging.epi, reduction = "pca", dims = 1:20)
+aging.epi <- FindClusters(aging.epi, resolution = 0.2)
+p <- DimPlot(aging.epi, split.by = 'Age', label = T)
+ggsave('Nature_scRNA_Aging_Figs/EpiOnlyClusters.jpg', plot = p)
+save(aging.epi, file = 'Nature_scRNA_Aging_Files/aging.epi')
+aging.epi <- ProjectDim(aging.epi, reduction = 'umap')
+p <- DimHeatmap(object = aging.epi, reduction = 'umap', projected = T, dims = 1, cells = 1000, balanced = T, fast = F) + scale_fill_gradientn(colors = c('blue','white','red'))
+ggsave('Nature_scRNA_Aging_Figs/DimHeatmap_OnlyEpi_1.jpg',plot = p)
+p <- DimHeatmap(object = aging.epi, reduction = 'umap', projected = T, dims = 2, cells = 1000, balanced = T, fast = F)+ scale_fill_gradientn(colors = c('blue','white','red'))
+ggsave('Nature_scRNA_Aging_Figs/DimHeatmap_OnlyEpi_2.eps',plot = p)
+
+## Known epithelial markers
+DefaultAssay(aging.epi) <- 'RNA'
+p <- FeaturePlot(aging.epi, features = c('Krt5','Mki67','Krtdap'))
+ggsave('Nature_scRNA_Aging_Figs/OnlyEpi_Krt5_Mki67_Krtdap.jpg', plot = p)
+
+## Cell cycle
+p <- DimPlot(aging.epi, group.by = 'Phase')
+ggsave('Nature_scRNA_Aging_Figs/OnlyEpi_CC.jpg', plot = p)
+
+## Get cluster markers 
+load('Nature_scRNA_Aging_Files/aging.epi')
+Idents(aging.epi.clean) <- 'Named_Clusters'
+epi.markers <- FindAllMarkers(aging.epi.clean, group.by = 'Named_Clusters', return.thresh = 0.05, max.cells.per.ident = 5000, assay = 'RNA')
+heatmarkers <- epi.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC) 
+Idents(aging.epi.clean) <- 'Named_Clusters'
+avex <- AverageExpression(aging.epi.clean, assays = 'RNA', return.seurat = T)
+avex <- ScaleData(avex, features = heatmarkers$gene)
+p <- DoHeatmap(avex, features = heatmarkers$gene, label = F,
+  slot = 'scale.data', draw.lines = F, assay = 'RNA', group.colors = kellycols)+
+  theme(text = element_text(size = 7.5)) + scale_fill_gradientn(colors = c('blue','white','red'))
+ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.jpg',plot = p)
+ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.eps',plot = p)
+write.csv(epi.markers, file = 'Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.csv')
+
+## Population comparison
+
+cpt <- prop.table(table(aging.epi$seurat_clusters, aging.epi$orig.ident), margin = 2)
+cpt <- melt(cpt)
+cpt$Age <- c(rep('Aged',299),rep('Young',312))
+cpt$Age <- factor(cpt$Age, levels = c('Young','Aged'))
+colnames(cpt) <- c('Cluster','Sample','Proportion','Age')
+p <- ggboxplot(cpt, x = "Age", y = "Proportion",color = "Age", add = 'jitter', palette = 'lancet', repel = T)+
+  stat_compare_means(label.y = 0.2, size = 3)+ 
+  facet_wrap(~Cluster)
+ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterProps.jpg', plot = p)
+
+## Get epi markers (top 100)
+epi.markers <- FindAllMarkers(aging.epi, group.by = 'seurat_clusters', return.thresh = 0.05, max.cells.per.ident = 5000, assay = 'RNA')
+heatmarkers <- epi.markers %>% group_by(cluster) %>% top_n(n = 100, wt = avg_log2FC) 
+write.csv(heatmarkers, file = 'Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers_top100.csv')
+
+## Get aging DEGs
+aging.markers <- FindMarkers(aging.epi, group.by = 'Age', ident.1 = 'Aged', assay = 'RNA', return.thresh = 0.05)
+aging.markers <- aging.markers[aging.markers$p_val_adj<0.05,]
+write.csv(aging.markers, file = 'Nature_scRNA_Aging_Figs/EpiOnly_AgingMarkers.csv')
+
+## Keep only clusters 0-10, as clusters 11-12 have very small numbers of cells
+aging.epi.clean <- subset(aging.epi, idents = c(0:10))
+save(aging.epi.clean, file = 'Nature_scRNA_Aging_Files/aging.epi.clean')
+
+## Assign new cluster names
+aging.epi.clean[['Named_Clusters']] <- revalue(aging.epi.clean$seurat_clusters,
+                                               replace = c('3' = 'Basal-1',
+                                                           '8' = 'Basal-2',
+                                                           '7' = 'Basal-3',
+                                                           '9' = 'Basal-4',
+                                                           '6' = 'Basal-5',
+                                                           '0' = 'Basal-6',
+                                                           '1' = 'Intermediate',
+                                                           '2' = 'Superficial-1',
+                                                           '4' = 'Superficial-2',
+                                                           '5' = 'Superficial-3',
+                                                           '10' = 'Superficial-4'
+                                                          ))
+p <- DimPlot(aging.epi.clean, split.by = 'Age', label = F, group.by = 'Named_Clusters')
+ggsave('Nature_scRNA_Aging_Figs/EpiOnlyClusters_Unlabeled.jpg', plot = p)
