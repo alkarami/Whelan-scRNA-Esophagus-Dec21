@@ -1,0 +1,162 @@
+library(Seurat)
+library(reshape)
+library(ggpubr)
+
+## Get the files
+org.files <- list()
+for(x in list.files('Organoid_scRNA', full.names = T)){
+  y <- Read10X(x)
+  pname <- strsplit(x,'/')[[1]][2]
+  pname <- strsplit(pname,'-')[[1]][1]
+  pname <- strsplit(pname,'_L1')[[1]][1]
+  y <- CreateSeuratObject(y, project = pname)
+  y <- PercentageFeatureSet(y, pattern = "mt-", col.name = "percent.mt")
+  y <- subset(y, subset = percent.mt < 20 & nFeature_RNA > 1500)
+  y$Sex <- substr(y$orig.ident, start = 1, stop = 1)
+  cytoid <- c()
+  for(z in y$orig.ident){
+    if(grepl("neg",z,ignore.case = T)){cytoid <- append(cytoid,"Neg")} else{if(grepl("pos",z,ignore.case = T)){cytoid <- append(cytoid, "Pos")} else{cytoid <- append(cytoid,"Unsorted")}}
+   }
+  y$CytoID <- cytoid
+  y <- NormalizeData(y)
+  y <- FindVariableFeatures(y)
+  print(paste(ncol(y),'cells','in',pname,sep = ' '))
+  org.files <- append(org.files,y)
+}
+
+## Perform integration pipeline
+features.org <- SelectIntegrationFeatures(object.list = org.files)
+anchors.org <- FindIntegrationAnchors(object.list = org.files, anchor.features = features.org)
+org.combined <- IntegrateData(anchorset = anchors.org)
+
+DefaultAssay(org.combined) <- "integrated"
+
+org.combined <- ScaleData(org.combined, verbose = FALSE)
+org.combined <- RunPCA(org.combined, npcs = 30, verbose = FALSE)
+org.combined <- RunUMAP(org.combined, reduction = "pca", dims = 1:20)
+org.combined <- FindNeighbors(org.combined, reduction = "pca", dims = 1:20)
+org.combined <- FindClusters(org.combined, resolution = 0.5)
+save(org.combined, file = 'Nature_scRNA_Aging_Files/org.combined')
+
+load('Nature_scRNA_Aging_Files/org.combined')
+DefaultAssay(org.combined) <- 'integrated'
+load('Nature_scRNA_Aging_Files/aging.epi.clean')
+DefaultAssay(aging.epi.clean) <- 'integrated'
+trans.anchors <- FindTransferAnchors(reference = aging.epi.clean,query = org.combined,dims = 1:30,
+                               reference.reduction = 'pca')
+TransferID <- TransferData(anchorset = trans.anchors, refdata = aging.epi.clean$Named_Clusters)
+org.combined <- AddMetaData(org.combined, metadata = TransferID)
+
+kellycols <- c('#AEA200','#00A6FF','yellow','#8B93FF','#00BD5C','#F8766D','orange','black','pink','purple','red')
+p <- DimPlot(org.combined, group.by = 'predicted.id', cols = kellycols)
+ggsave('Nature_scRNA_Aging_Figs/Org_PredID.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_PredID.eps', plot = p)
+
+save(org.combined, file = 'Nature_scRNA_Aging_Files/org.combined')
+
+cpt <- prop.table(table(org.combined$predicted.id, org.combined$orig.ident), margin = 2)
+cpt <- melt(cpt)
+cpt$Tissue <- rep('Organoid',nrow(cpt))
+colnames(cpt) <- c('Cluster','Sample','Proportion','Tissue')
+cpt.mouse <- prop.table(table(aging.epi.clean$Named_Clusters, aging.epi.clean$orig.ident), margin = 2)
+cpt.mouse <- melt(cpt.mouse)
+cpt.mouse$Tissue <- rep('Epithelium',nrow(cpt.mouse))
+colnames(cpt.mouse) <- c('Cluster','Sample','Proportion','Tissue')
+cpt <- rbind(cpt,cpt.mouse)
+cpt$Tissue <- factor(cpt$Tissue, levels = c('Epithelium','Organoid'))
+cpt$Cluster <- revalue(cpt$Cluster, replace = c('Intermediate'='Suprabasal'))
+
+p <- ggboxplot(cpt, x = "Tissue", y = "Proportion",color = "Tissue",
+               add = 'jitter', palette = 'lancet', repel = T, 
+               ylim = c(0,0.7))+
+  stat_compare_means(label.y = 0.6, size = 3, label = 'p.signif',
+                     comparisons = list(c('Epithelium','Organoid')))+ 
+  facet_wrap(~Cluster)+font("xy.text", size = 7)
+ggsave('Nature_scRNA_Aging_Figs/EpiOrg_ClusterProps.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/EpiOrg_ClusterProps.eps', plot = p)
+
+DefaultAssay(org.combined) <- 'RNA'
+p <- FeaturePlot(org.combined, features = 'Krt5')
+ggsave('Nature_scRNA_Aging_Figs/Org_Krt5.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_Krt5.eps', plot = p)
+p <- FeaturePlot(org.combined, features = 'Krtdap')
+ggsave('Nature_scRNA_Aging_Figs/Org_Krtdap.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_Krtdap.eps', plot = p)
+p <- FeaturePlot(org.combined, features = 'Ivl')
+ggsave('Nature_scRNA_Aging_Figs/Org_Ivl.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_Ivl.eps', plot = p)
+p <- FeaturePlot(org.combined, features = 'Flg')
+ggsave('Nature_scRNA_Aging_Figs/Org_Flg.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_Flg.eps', plot = p)
+p <- FeaturePlot(org.combined, features = 'prediction.score.max')
+ggsave('Nature_scRNA_Aging_Figs/Org_PSM.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_PSM.eps', plot = p)
+
+## Compare similar clusters
+Idents(aging.epi.clean) <- 'Age'
+aec.ds <- subset(aging.epi.clean, downsample = 2500)
+Idents(org.combined) <- 'CytoID'
+org.ds <- subset(org.combined, downsample = 5000)
+org.ds <- subset(org.ds, idents = 'Unsorted')
+org.ds$Named_Clusters <- org.ds$predicted.id
+aec.ds$Tissue <- rep('Epithelium', ncol(aec.ds))
+org.ds$Tissue <- rep('Organoid', ncol(org.ds))
+org.ds$Age <- rep('Organoid', ncol(org.ds))
+combined.ds <- merge(aec.ds,org.ds)
+
+DefaultAssay(combined.ds) <- 'RNA'
+Idents(combined.ds) <- 'Named_Clusters'
+B1 <- FindMarkers(combined.ds, subset.ident = 'Basal-1', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+B1$Cluster <- rep('Basal-1',nrow(B1))
+B2 <- FindMarkers(combined.ds, subset.ident = 'Basal-2', 
+                 group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+B2$Cluster <- rep('Basal-2',nrow(B2))
+B3 <- FindMarkers(combined.ds, subset.ident = 'Basal-3', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+B3$Cluster <- rep('Basal-3',nrow(B3))
+B4 <- FindMarkers(combined.ds, subset.ident = 'Basal-4', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+B4$Cluster <- rep('Basal-4',nrow(B4))
+B5 <- FindMarkers(combined.ds, subset.ident = 'Basal-5', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+B5$Cluster <- rep('Basal-5',nrow(B5))
+B6 <- FindMarkers(combined.ds, subset.ident = 'Basal-6', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+B6$Cluster <- rep('Basal-6',nrow(B6))
+Su <- FindMarkers(combined.ds, subset.ident = 'Intermediate', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+Su$Cluster <- rep('Suprabasal',nrow(Su))
+S1 <- FindMarkers(combined.ds, subset.ident = 'Superficial-1', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+S1$Cluster <- rep('Superficial-1',nrow(S1))
+S2 <- FindMarkers(combined.ds, subset.ident = 'Superficial-2', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+S2$Cluster <- rep('Superficial-2',nrow(S2))
+S3 <- FindMarkers(combined.ds, subset.ident = 'Superficial-3', 
+                  group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+S3$Cluster <- rep('Superficial-3',nrow(S3))
+S4 <- FindMarkers(combined.ds, subset.ident = 'Superficial-4', 
+                 group.by = 'Tissue', ident.1 = 'Organoid' , logfc.threshold = 0)
+S4$Cluster <- rep('Superficial-4',nrow(S4))
+
+# Assign "significant" or "non-significant" for each fold change given adjusted p-value.
+jitdf <- as.data.frame(rbind(B1,B2,B3,B4,B5,B6,Su,S1,S2,S3,S4))
+sig <- c()
+for (x in jitdf$p_val_adj){if (x >= 0.05){sig <- append(sig,'Non-Significant')} else {sig <- append(sig,'Significant')}}
+# Add significance classifications to the dataframe.
+jitdf$Significance <- sig
+# Relevel the clusters, just in case. 
+jitdf$Cluster <- factor(jitdf$Cluster, levels = c('Basal-1','Basal-2','Basal-3',
+                                                  'Basal-4','Basal-5','Basal-6',
+                                                  'Suprabasal','Superficial-1',
+                                                  'Superficial-2','Superficial-3',
+                                                  'Superficial-4'))
+# Plot.
+p <- ggplot(jitdf, aes(x=Cluster, y=avg_log2FC, color = Significance)) +
+  geom_jitter() + theme_classic() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  ylab('Average Natural log FC') + 
+  scale_color_manual(values=c('blue','red'))
+ggsave('Nature_scRNA_Aging_Figs/Org_ClusterVS.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Org_ClusterVS.eps', plot = p)
