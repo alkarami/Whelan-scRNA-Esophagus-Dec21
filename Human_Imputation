@@ -1,0 +1,78 @@
+## Work with Fitzgerald lab's data
+fld <- readRDS('NE.rds')
+library(biomaRt)
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+homodf <- getLDS(attributes = c("external_gene_name"),
+       filters = "external_gene_name", values = rownames(fld), mart = human,
+       attributesL = c("external_gene_name"), martL = mouse)
+homogene <- c()
+for(x in rownames(fld)){
+  if(x %in% homodf[,1]){homogene <- append(homogene,
+                                           homodf[homodf$Gene.name==x,'Gene.name.1'][1])} else {homogene <- append(homogene,x)}
+}
+fld <- as.Seurat(fld, counts = "counts", data = "logcounts")
+homogene <- gsub('_','\\.', homogene)
+homogene <- make.unique(homogene)
+rownames(fld@assays$originalexp@counts) <- homogene
+rownames(fld@assays$originalexp@data) <- homogene
+fld@assays$originalexp@meta.features <- data.frame(row.names = homogene)
+Idents(fld) <- 'cell_type'
+fld <- subset(fld, idents = 'Immune', invert = T)
+fld <- NormalizeData(fld)
+fld <- FindVariableFeatures(fld)
+fld <- ScaleData(fld, vars.to.regress = 'Sample')
+fld <- RunPCA(fld)
+
+load('Nature_scRNA_Aging_Files/aging.epi.clean')
+aec.copy <- aging.epi.clean
+DefaultAssay(aec.copy) <- 'integrated'
+trans.anchors <- FindTransferAnchors(reference = aec.copy,query = fld,dims = 1:30,
+                                     reference.reduction = 'pca')
+TransferID <- TransferData(anchorset = trans.anchors, refdata = aec.copy$Named_Clusters)
+fld <- AddMetaData(fld, metadata = TransferID)
+p <- DimPlot(fld, group.by = 'predicted.id', cols = kellycols[-1])
+ggsave('Nature_scRNA_Aging_Figs/Human_Clusters.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Human_Clusters.eps', plot = p)
+p <- DimPlot(fld, group.by = 'cell_type_secondary', cols = 
+               c('coral1','seagreen','green','blue','violet'))
+ggsave('Nature_scRNA_Aging_Figs/Human_Clusters_Original.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Human_Clusters_Original.eps', plot = p)
+p <- FeaturePlot(fld, features = 'prediction.score.max')
+ggsave('Nature_scRNA_Aging_Figs/Human_PSM.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Human_PSM.eps', plot = p)
+
+library(reshape)
+cpt <- prop.table(table(fld$predicted.id, fld$Sample), margin = 2)
+cpt <- melt(cpt)
+cpt$Tissue <- rep('Human',nrow(cpt))
+cpt_b1 <- as.data.frame(cbind(rep('Basal-1',9),unique(fld$Sample),rep(0,9),rep('Human',9)))
+colnames(cpt) <- c('Cluster','Sample','Proportion','Tissue')
+colnames(cpt_b1) <- c('Cluster','Sample','Proportion','Tissue')
+cpt <- rbind(cpt,cpt_b1)
+cpt.mouse <- prop.table(table(aec.copy$Named_Clusters, aec.copy$orig.ident), margin = 2)
+cpt.mouse <- melt(cpt.mouse)
+cpt.mouse$Tissue <- rep('Mouse',nrow(cpt.mouse))
+colnames(cpt.mouse) <- c('Cluster','Sample','Proportion','Tissue')
+cpt <- rbind(cpt,cpt.mouse)
+cpt$Tissue <- factor(cpt$Tissue, levels = c('Mouse','Human'))
+cpt$Cluster <- revalue(cpt$Cluster, replace = c('Intermediate'='Suprabasal'))
+cpt$Proportion <- as.numeric(cpt$Proportion)
+cpt$Cluster <- factor(cpt$Cluster, levels = c('Basal-1','Basal-2',
+                                              'Basal-3','Basal-4',
+                                              'Basal-5','Basal-6',
+                                              'Suprabasal','Superficial-1',
+                                              'Superficial-2',
+                                              'Superficial-3',
+                                              'Superficial-4'))
+library(ggpubr)
+p <- ggboxplot(cpt, x = "Tissue", y = "Proportion",color = "Tissue",
+               add = 'jitter', palette = 'lancet', repel = T, 
+               ylim = c(0,0.7))+
+  stat_compare_means(label.y = 0.6, size = 3, label = 'p.signif',
+                     comparisons = list(c('Human','Mouse')))+ 
+  facet_wrap(~Cluster)+font("xy.text", size = 8)
+ggsave('Nature_scRNA_Aging_Figs/HumanMouse_ClusterProps.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/HumanMouse_ClusterProps.eps', plot = p)
