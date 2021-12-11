@@ -1,0 +1,109 @@
+library(monocle3)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+
+load('Nature_scRNA_Aging_Files/aging.epi.clean')
+exmat <- GetAssayData(aging.epi.clean, slot = 'counts', assay = 'RNA')
+mdat <- as.data.frame(cbind(aging.epi.clean$nCount_RNA,aging.epi.clean$nFeature_RNA,
+                            aging.epi.clean$Age, aging.epi.clean$percent.mt,
+                            aging.epi.clean$Sex, aging.epi.clean$Phase, 
+                            aging.epi.clean$Named_Clusters,
+                            aging.epi.clean$Celltype,
+                            aging.epi.clean$orig.ident,
+                            aging.epi.clean$Mouse))
+colnames(mdat) <- c('nCount_RNA','nFeature_RNA','Age','percent.mt','Sex',
+                    'Phase','Named_Clusters','Celltype','orig.ident','Mouse')
+DefaultAssay(aging.epi.clean) <- 'RNA'
+genedf <- cbind(rownames(aging.epi.clean),rownames(aging.epi.clean),rownames(aging.epi.clean))
+rownames(genedf) <- genedf[,1]
+genedf <- genedf[,-1]
+colnames(genedf) <- c('gene_short_name','gene_name')
+rm(aging.epi.clean)
+
+## Start M3 workflow
+aging.m3 <- new_cell_data_set(exmat,cell_metadata = mdat,
+                               gene_metadata = genedf)
+aging.m3 <- preprocess_cds(aging.m3, num_dim = 100)
+aging.m3 <- align_cds(aging.m3, alignment_group = "orig.ident")
+aging.m3 <- reduce_dimension(aging.m3, umap.n_neighbors = 50)
+aging.m3 <- cluster_cells(aging.m3)
+
+## Save initial partitions image
+p <- plot_cells(aging.m3, color_cells_by = 'partition')
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_AllCells.png', plot = p)
+
+## Learn graph and learn the order
+aging.m3 <- learn_graph(aging.m3)
+pData(aging.m3)$Named_Clusters <- aging.epi.clean$Named_Clusters
+pData(aging.m3)$Phase <- aging.epi.clean$Phase
+p <- plot_cells(aging.m3, color_cells_by = 'Named_Clusters', 
+                label_groups_by_cluster = F,label_leaves = F,
+                label_branch_points = F, label_cell_groups = F,
+                trajectory_graph_color = 'grey45', 
+                show_trajectory_graph = F) + 
+  scale_color_manual(values = kellycols)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_Trajectory.png', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_Trajectory.eps', plot = p)
+aging.m3 <- order_cells(aging.m3)
+p <- plot_cells(aging.m3, color_cells_by = 'pseudotime',label_leaves = F,
+                label_branch_points = F, label_roots = F, 
+                show_trajectory_graph = F)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_Pseudotime.png', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_Pseudotime.eps', plot = p)
+p <- plot_cells(aging.m3, color_cells_by = 'Phase', 
+                label_groups_by_cluster = F,label_leaves = F,
+                label_branch_points = F, label_cell_groups = F,
+                trajectory_graph_color = 'grey45', label_roots = F,
+                show_trajectory_graph = F)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_Phase.png', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_Phase.eps', plot = p)
+
+aging_res <- graph_test(aging.m3, neighbor_graph="principal_graph", cores=4)
+aging_ids <- row.names(subset(aging_res, q_value < 0.05))
+save(aging_ids, file = 'Nature_scRNA_Aging_Files/aging_ids')
+
+gene_module_df <- find_gene_modules(aging.m3[aging_ids,], resolution=1e-2,
+                                    k = 50)
+cell_group_df <- tibble::tibble(cell=row.names(colData(aging.m3)), 
+                                cell_group=colData(aging.m3)$Named_Clusters)
+agg_mat <- aggregate_gene_expression(aging.m3, gene_module_df, cell_group_df)
+row.names(agg_mat) <- stringr::str_c("Module ", row.names(agg_mat))
+cell_colors = colorRampPalette(c("#043177", "#244B88", "#FAFAFA", "#C62E2E", "#BF0F0F"))(50)
+p <- pheatmap::pheatmap(agg_mat,
+                   scale="column", clustering_method="ward.D2", 
+                   fontsize_row = 7, color = cell_colors)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_GeneModules.jpg', plot = p)
+ggsave('Nature_scRNA_Aging_Figs/Aging_M3_GeneModules.eps', plot = p)
+
+## Make gene lists for all modules
+for(x in unique(gene_module_df$module)){
+  y <- gene_module_df[gene_module_df$module==x,]
+  write.csv(y, file = paste('Nature_scRNA_Aging_Figs/Modules/Module_',
+                            x,'.csv'))
+}
+
+## Make figures for all modules
+for(x in unique(gene_module_df$module)){
+p <- plot_cells(aging.m3,
+                genes=gene_module_df %>% filter(module %in% c(x)),
+                label_cell_groups=FALSE,
+                show_trajectory_graph=FALSE, label_roots = F)
+ggsave(paste('Nature_scRNA_Aging_Figs/Modules/Module_',x,'.jpg',
+             sep = ''), 
+       plot = p)
+ggsave(paste('Nature_scRNA_Aging_Figs/Modules/Module_',x,'.eps',
+             sep = ''), 
+       plot = p)}
+
+## Make figures for epithelial genes across the differentiation
+## gradient
+diffgenes <- c('Krt14', 'Krt15', 'Krt5', 'Krt13', 
+               'Krt4', 'Krtdap', 'Mki67')
+for(x in diffgenes){
+aging_diff_cds <- aging.m3[rowData(aging.m3)$gene_short_name %in% x,]
+p <- plot_genes_in_pseudotime(aging_diff_cds, ncol = 2,
+                         color_cells_by = 'Named_Clusters') +
+  scale_color_manual(values = kellycols)
+ggsave(plot = p, paste('Nature_scRNA_Aging_Figs/Pseudotime_',x,'.png',
+                       sep = ''))}
