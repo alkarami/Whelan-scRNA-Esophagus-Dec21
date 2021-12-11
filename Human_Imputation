@@ -1,6 +1,9 @@
 ## Work with Fitzgerald lab's data
-fld <- readRDS('NE.rds')
 library(biomaRt)
+library(Seurat)
+
+load('Nature_scRNA_Aging_Files/aging.epi.clean')
+fld <- readRDS('NE.rds')
 human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 
 mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
