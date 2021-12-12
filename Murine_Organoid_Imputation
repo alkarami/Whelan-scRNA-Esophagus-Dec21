@@ -1,6 +1,7 @@
 library(Seurat)
 library(reshape)
 library(ggpubr)
+library(monocle3)
 
 ## Get the files
 org.files <- list()
@@ -160,3 +161,47 @@ p <- ggplot(jitdf, aes(x=Cluster, y=avg_log2FC, color = Significance)) +
   scale_color_manual(values=c('blue','red'))
 ggsave('Nature_scRNA_Aging_Figs/Org_ClusterVS.jpg', plot = p)
 ggsave('Nature_scRNA_Aging_Figs/Org_ClusterVS.eps', plot = p)
+
+## Perform pseudotime with Monocle 3. Downsample for less computational pressure
+Idents(aging.epi.clean) <- 'Age'
+aec.ds <- subset(aging.epi.clean, downsample = 5000)
+org.ds <- subset(org.combined, downsample = 5000)
+org.ds$Named_Clusters <- org.ds$predicted.id
+aec.ds$Tissue <- rep('Epithelium', ncol(aec.ds))
+org.ds$Tissue <- rep('Organoid', ncol(org.ds))
+org.ds$Age <- rep('Organoid', ncol(org.ds))
+combined.ds <- merge(aec.ds,org.ds)
+exmat <- GetAssayData(combined.ds, slot = 'counts', assay = 'RNA')
+mdat <- as.data.frame(cbind(combined.ds$nCount_RNA,combined.ds$nFeature_RNA,
+                            combined.ds$Age, combined.ds$percent.mt,
+                            combined.ds$Sex, combined.ds$Phase, 
+                            combined.ds$Named_Clusters,
+                            combined.ds$Celltype,
+                            combined.ds$orig.ident,
+                            combined.ds$Mouse,combined.ds$Tissue))
+colnames(mdat) <- c('nCount_RNA','nFeature_RNA','Age','percent.mt','Sex',
+                    'Phase','Named_Clusters','Celltype','orig.ident','Mouse','Tissue')
+DefaultAssay(combined.ds) <- 'RNA'
+genedf <- cbind(rownames(combined.ds),rownames(combined.ds),
+                rownames(combined.ds))
+rownames(genedf) <- genedf[,1]
+genedf <- genedf[,-1]
+colnames(genedf) <- c('gene_short_name','gene_name')
+rm(aging.epi.clean)
+
+epi.org.m3 <- new_cell_data_set(exmat,cell_metadata = mdat,
+                              gene_metadata = genedf)
+epi.org.m3 <- preprocess_cds(epi.org.m3, num_dim = 100)
+epi.org.m3 <- align_cds(epi.org.m3, alignment_group = "orig.ident")
+epi.org.m3 <- reduce_dimension(epi.org.m3, umap.n_neighbors = 100)
+epi.org.m3 <- cluster_cells(epi.org.m3)
+
+p <- plot_cells(epi.org.m3, color_cells_by = 'Named_Clusters', label_cell_groups = F) + 
+  scale_color_manual(values=kellycols)
+ggsave('Nature_scRNA_Aging_Figs/EpiOrg_PT_Clusters.eps', plot = p)
+
+p <- plot_cells(epi.org.m3, color_cells_by = 'Tissue', label_cell_groups = F) + 
+  scale_color_manual(values=c('red','blue'))
+ggsave('Nature_scRNA_Aging_Figs/EpiOrg_PT_Tissue.eps', plot = p)
+
+save(epi.org.m3, file = 'Nature_scRNA_Aging_Files/epi.org.m3')
