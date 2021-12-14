@@ -6,7 +6,9 @@ library(reshape)
 library(ggpubr)
 library(plyr)
 
-## Get the files
+## Get the files, assuming that there is a folder in the directory named
+## 'Nature_scRNA_Aging_Trimmed' containing the filtered barcode matrix
+## folders from the output of cellranger count for each sample
 trimmed.files <- list()
 for(x in list.files('Nature_scRNA_Aging_Trimmed', full.names = T)){
   y <- Read10X(x)
@@ -25,6 +27,17 @@ for(x in trimmed.files){
               x@project.name,'.txt',sep = '')
   write.table(GetAssayData(x),
               file = fn)
+}
+
+## NOTE: If using the .txt matrices downloaded from GEO, use this loop instead
+trimmed.files <- list()
+for(x in list.files('Nature_scRNA_Aging_Trimmed', full.names = T)){
+  y <- read.table(x, header = T, row.names = T)
+  pname <- strsplit(x,'.txt')[[1]][1]
+  y <- CreateSeuratObject(y, project = pname)
+  y <- PercentageFeatureSet(y, pattern = "mt-", col.name = "percent.mt")
+  print(paste(ncol(y),'cells','in',pname,sep = ' '))
+  trimmed.files <- append(trimmed.files,y)
 }
 
 ## Merge technical replicates into their respective biological samples
