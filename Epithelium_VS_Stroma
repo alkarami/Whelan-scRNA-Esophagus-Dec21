@@ -1,0 +1,41 @@
+library(Rsubread)
+library(DESeq2)
+
+## This script assumes that all the FASTQ files are stored in a folder
+## called "BulkRNA"
+
+## Build index
+buildindex('mouse','GRCm38.p6.genome.fa.gz',gappedIndex = T)
+
+## Make .bam files with align()
+afiles <- list.files('BulkRNA/',pattern = '_1.fq.gz', recursive = T, full.names = T)
+bfiles <- list.files('BulkRNA/',pattern = '_2.fq.gz', recursive = T, full.names = T)
+align('mouse',afiles,readfile2 = bfiles, nthreads = 4)
+
+## Run featurecounts to count reads mapped to each feature (gene)
+bams <- list.files('BulkRNA/',pattern = '.BAM$', recursive = T, full.names = T)
+fc <- featureCounts(files=bams, annot.ext = 'gencode.vM25.annotation.gtf.gz', isPairedEnd= T, 
+                    GTF.attrType="gene_name", isGTFAnnotationFile = T, nthreads = 4)
+newnames <- sapply(strsplit(colnames(fc$counts), "_"), "[[", 1)
+colnames(fc$counts) <- newnames
+epi_reseq <- fc$counts
+
+## Identify organ
+Tissue <- c()
+for(x in colnames(epi_reseq)){
+  if(substr(x,3,3)=='S'){Tissue <- append(Tissue,'Stroma')} else{
+    Tissue <- append(Tissue,'Epithelium')
+  }
+}
+
+## Make metadata
+md <- as.data.frame(cbind(colnames(epi_reseq),Tissue))
+rownames(md) <- md[,1]
+md <- md[,-1,drop = F]
+
+## Run the DESeq2 analysis
+Tissueds <- DESeqDataSetFromMatrix(countData = epi_reseq, colData = md, design = ~Tissue)
+Tissuedds <- DESeq(Tissueds)
+Tissue_results <- results(Tissuedds, contrast = c('Tissue','Epithelium','Stroma'))
+Tissue_results <- Tissue_results[which(Tissue_results$padj<0.05),]
+write.csv(as.data.frame(Tissue_results), file = 'Epithelium_Stroma_DEGs.csv')
