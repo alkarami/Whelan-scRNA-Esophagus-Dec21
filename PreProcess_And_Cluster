@@ -8,7 +8,9 @@ library(plyr)
 
 ## Get the files, assuming that there is a folder in the directory named
 ## 'Nature_scRNA_Aging_Trimmed' containing the filtered barcode matrix
-## folders from the output of cellranger count for each sample
+## folders from the output of cellranger count for each sample, with each
+## folder's name prefixed by the sample name. 
+
 trimmed.files <- list()
 for(x in list.files('Nature_scRNA_Aging_Trimmed', full.names = T)){
   y <- Read10X(x)
