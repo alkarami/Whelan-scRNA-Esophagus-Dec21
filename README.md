@@ -14,6 +14,7 @@ The core dependencies for these scripts:
 
 For the supplementary verification of epithelial vs. stromal expression in our single-cell dataset, the following are also
 necessary:
+
 4. Rsubread 2.8 https://bioconductor.org/packages/release/bioc/html/Rsubread.html
 
 5. DESeq2 1.34 https://bioconductor.org/packages/release/bioc/html/DESeq2.html
