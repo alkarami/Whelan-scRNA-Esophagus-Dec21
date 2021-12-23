@@ -115,12 +115,12 @@ p <- FeaturePlot(aging.combined, features = c('Krt5','Krt14','Krt15','Dst','Col1
 ggsave('Nature_scRNA_Aging_Figs/DistBasalMarkers.jpg', plot = p)
 
 ## Excise non-epithelial populations and re-cluster
-aging.epi <- subset(aging.combined, idents = c(0,1,2,3,4,5,6,7,8,9,10,14,15))
+aging.epi <- subset(aging.combined, idents = c(0,1,2,3,4,5,6,7,8,9,11))
 DefaultAssay(aging.epi) <- 'integrated'
 aging.epi <- ScaleData(aging.epi)
 aging.epi <- RunPCA(aging.epi, npcs = 30, verbose = FALSE)
-aging.epi <- RunUMAP(aging.epi, reduction = "pca", dims = 1:20, n.neighbors = 20)
-aging.epi <- FindNeighbors(aging.epi, reduction = "pca", dims = 1:20)
+aging.epi <- RunUMAP(aging.epi, reduction = "pca", dims = 1:30)
+aging.epi <- FindNeighbors(aging.epi, reduction = "pca", dims = 1:30)
 aging.epi <- FindClusters(aging.epi, resolution = 0.2)
 p <- DimPlot(aging.epi, split.by = 'Age', label = T)
 ggsave('Nature_scRNA_Aging_Figs/EpiOnlyClusters.jpg', plot = p)
@@ -154,6 +154,23 @@ p <- DoHeatmap(avex, features = heatmarkers$gene, label = F,
 ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.jpg',plot = p)
 ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.eps',plot = p)
 write.csv(epi.markers, file = 'Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.csv')
+
+## Excise endothelial populations and re-cluster
+aging.epi <- subset(aging.combined, idents = c(0,1,2,3,4,5,6,7,9,10))
+DefaultAssay(aging.epi) <- 'integrated'
+aging.epi <- ScaleData(aging.epi)
+aging.epi <- RunPCA(aging.epi, npcs = 30, verbose = FALSE)
+aging.epi <- RunUMAP(aging.epi, reduction = "pca", dims = 1:30)
+aging.epi <- FindNeighbors(aging.epi, reduction = "pca", dims = 1:30)
+aging.epi <- FindClusters(aging.epi, resolution = 0.2)
+p <- DimPlot(aging.epi, split.by = 'Age', label = T)
+ggsave('Nature_scRNA_Aging_Figs/EpiOnlyClusters.jpg', plot = p)
+save(aging.epi, file = 'Nature_scRNA_Aging_Files/aging.epi')
+aging.epi <- ProjectDim(aging.epi, reduction = 'umap')
+p <- DimHeatmap(object = aging.epi, reduction = 'umap', projected = T, dims = 1, cells = 1000, balanced = T, fast = F) + scale_fill_gradientn(colors = c('blue','white','red'))
+ggsave('Nature_scRNA_Aging_Figs/DimHeatmap_OnlyEpi_1.jpg',plot = p)
+p <- DimHeatmap(object = aging.epi, reduction = 'umap', projected = T, dims = 2, cells = 1000, balanced = T, fast = F)+ scale_fill_gradientn(colors = c('blue','white','red'))
+ggsave('Nature_scRNA_Aging_Figs/DimHeatmap_OnlyEpi_2.eps',plot = p)
 
 ## Population comparison
 
