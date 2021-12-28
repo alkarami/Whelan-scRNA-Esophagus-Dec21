@@ -5,9 +5,9 @@ library(ggplot)
 library(dplyr)
 library(gtools)
 
-load('Nature_scRNA_Aging_Files/aging.epi.clean')
+load('Nature_scRNA_Aging_Files/aging.epi')
 ## Population comparison
-cpt <- prop.table(table(aging.epi.clean$Named_Clusters, aging.epi.clean$orig.ident), margin = 2)
+cpt <- prop.table(table(aging.epi$Named_Clusters, aging.epi$orig.ident), margin = 2)
 cpt <- melt(cpt)
 cpt$Age <- c(rep('Aged',253),rep('Young',nrow(cpt)-253))
 cpt$Age <- factor(cpt$Age, levels = c('Young','Aged'))
@@ -22,26 +22,22 @@ p <- ggboxplot(cpt, x = "Age", y = "Proportion",color = "Age", add = 'jitter', p
 ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterProps.eps', plot = p)
 
 ## Show Krt5 and Krtdap
-DefaultAssay(aging.epi.clean) <- 'RNA'
-p <- FeaturePlot(aging.epi.clean, features = 'Krt5', raster = F)
+DefaultAssay(aging.epi) <- 'RNA'
+p <- FeaturePlot(aging.epi, features = 'Krt5', raster = F)
 ggsave('Nature_scRNA_Aging_Figs/OnlyEpi_Krt5.eps',plot = p)
 ggsave('Nature_scRNA_Aging_Figs/OnlyEpi_Krt5.jpg',plot = p)
-p <- FeaturePlot(aging.epi.clean, features = 'Krtdap', raster = F)
+p <- FeaturePlot(aging.epi, features = 'Krtdap', raster = F)
 ggsave('Nature_scRNA_Aging_Figs/OnlyEpi_Krtdap.eps',plot = p)
 ggsave('Nature_scRNA_Aging_Figs/OnlyEpi_Krtdap.jpg',plot = p)
 
-## Downsample for pseudotime
-aging.epi.clean.ds <- subset(aging.epi.clean, cells = sample(Cells(aging.epi.clean), 10000))
-save(aging.epi.clean.ds, file = 'Nature_scRNA_Aging_Files/aging.epi.clean.ds')
-
 ## Create final version of figures
-kellycols <- c('#AEA200','#00A6FF','yellow','#8B93FF','#00BD5C','#F8766D','orange','black','pink','purple','red')
-aging.epi.clean$Age <- factor(aging.epi.clean$Age, levels = c('Young','Aged'))
+kellycols <- c('#AEA200','lightskyblue','yellow','#8B93FF','#00BD5C','#F8766D','orange','black','pink','purple','red')
+aging.epi$Age <- factor(aging.epi$Age, levels = c('Young','Aged'))
 p <- DimPlot(aging.epi.clean, group.by = 'Named_Clusters', split.by = 'Age', cols = kellycols, raster = F)
 ggsave('Nature_scRNA_Aging_Figs/Clusters_Colored.jpg', plot = p)
 ggsave('Nature_scRNA_Aging_Figs/Clusters_Colored.eps', plot = p)
 
-p <- DimPlot(aging.epi.clean, group.by = 'Named_Clusters',cols = kellycols, raster = F)
+p <- DimPlot(aging.epi, group.by = 'Named_Clusters',cols = kellycols, raster = F)
 ggsave('Nature_scRNA_Aging_Figs/Clusters_Colored_Combined.jpg', plot = p)
 ggsave('Nature_scRNA_Aging_Figs/Clusters_Colored_Combined.eps', plot = p)
 
@@ -49,9 +45,8 @@ ggsave('Nature_scRNA_Aging_Figs/Clusters_Colored_Combined.eps', plot = p)
 epi.markers <- as.data.frame(read.csv('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.csv', header = T, row.names = 1))
 heatmarkers <- epi.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC) 
 heatmarkers <- heatmarkers[!(heatmarkers$cluster %in% c(11,12)),]
-avex <- AverageExpression(aging.epi.clean, assays = 'RNA', return.seurat = T)
-avex <- ScaleData(avex, features = heatmarkers$gene)
-p <- DoHeatmap(avex, features = heatmarkers$gene, label = F,
+aging.epi <- ScaleData(aging.epi, features = heatmarkers$gene)
+p <- DoHeatmap(aging.epi, features = heatmarkers$gene, label = F,
                slot = 'scale.data', draw.lines = F, assay = 'RNA', group.colors = kellycols)+
   theme(text = element_text(size = 7.5))+
   scale_fill_gradientn(colors = c('blue','white','red'))
@@ -59,9 +54,9 @@ ggsave('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.eps',plot = p)
 
 ## Get DEGs comparing each cluster's aged vs young populations
 aging.clusters.df <- data.frame(matrix(ncol=8))
-Idents(aging.epi.clean) <- 'Named_Clusters'
-for(x in levels(factor(aging.epi.clean$Named_Clusters))){
-  y <- as.data.frame(FindMarkers(aging.epi.clean, subset.ident = x, 
+Idents(aging.epi) <- 'Named_Clusters'
+for(x in levels(factor(aging.epi$Named_Clusters))){
+  y <- as.data.frame(FindMarkers(aging.epi, subset.ident = x, 
                     group.by = 'Age',ident.1 = 'Aged', assay = 'RNA',
                     logfc.threshold = 0))
   y$Significance <- rep('Significant',nrow(y))
@@ -76,46 +71,27 @@ write.csv(aging.clusters.df[aging.clusters.df$p_val_adj<0.05,], file = 'Nature_s
 p <- ggplot(aging.clusters.df, aes(x=Cluster, y=avg_log2FC, color = Significance)) + geom_jitter() + theme_classic() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylab('Average log2FC') + scale_color_manual(values=c('blue','red'))
 ggsave('Nature_scRNA_Aging_Figs/EpiOnly_AgingMarkers_PerCluster.eps',plot = p)
 
-## Compare mitochondrial genes in aging
-age_markers <- as.data.frame(read.csv('Nature_scRNA_Aging_Figs/EpiOnly_AgingMarkers.csv', header = T, row.names = 1))
-mt_genes <- rownames(age_markers)[grep(rownames(age_markers),pattern = 'mt-')]
-Idents(aging.epi.clean) <- 'orig.ident'
-DefaultAssay(aging.epi.clean) <- 'RNA'
-mt_obj <- aging.epi.clean[mt_genes,]
-mt_obj <- AverageExpression(mt_obj, assays = 'RNA')
-mt_obj <- melt(mt_obj)
-mt_obj$Age <- c(rep('Aged',253),rep('Young',nrow(mt_obj)-253))
-colnames(mt_obj) <- c('Gene','Sample','Average_Expression','Assay','Age')
-mt_obj$Age <- factor(mt_obj$Age, levels = c('Young','Aged'))
-mt_obj$Gene <- factor(mt_obj$Gene, levels = c('mt-Atp6','mt-Co1','mt-Co2','mt-Co3','mt-Cytb','mt-Nd1','mt-Nd2','mt-Nd3','mt-Nd4','mt-Nd4l','mt-Nd5'))
-p <- ggboxplot(mt_obj, x = "Age", y = "Average_Expression",color = "Age", add = 'jitter', palette = 'lancet', repel = T, ylim = c(0,200))+
-  stat_compare_means(size = 3, label.y = 175, label = 'p.signif')+ 
-  facet_wrap(~Gene)
-ggsave('Nature_scRNA_Aging_Figs/MTGenes_NormExp.jpg', plot = p)
-ggsave('Nature_scRNA_Aging_Figs/MTGenes_NormExp.eps', plot = p)
-
 ## Group cells into basal, suprabasal, and superficial
-aging.epi.clean[['Celltype']] <- revalue(aging.epi.clean$Named_Clusters, replace = c('Basal-1' = 'Basal','Basal-2' = 'Basal','Basal-3' = 'Basal','Basal-4' = 'Basal','Basal-5' = 'Basal','Basal-6' = 'Basal','Superficial-1' = 'Superficial','Superficial-2' = 'Superficial','Superficial-3' = 'Superficial','Superficial-4' = 'Superficial'))
-save(aging.epi.clean, file = 'Nature_scRNA_Aging_Files/aging.epi.clean')
+aging.epi[['Celltype']] <- revalue(aging.epi.clean$Named_Clusters, replace = c('Basal-1' = 'Basal','Basal-2' = 'Basal','Basal-3' = 'Basal','Basal-4' = 'Basal','Basal-5' = 'Basal','Basal-6' = 'Basal','Superficial-1' = 'Superficial','Superficial-2' = 'Superficial','Superficial-3' = 'Superficial','Superficial-4' = 'Superficial'))
+save(aging.epi, file = 'Nature_scRNA_Aging_Files/aging.epi')
 
 ## Determine celltype markers
-Idents(aging.epi.clean) <- 'Celltype'
-ct_marks <- FindAllMarkers(aging.epi.clean, assay = 'RNA', return.thresh = 0.05)
+Idents(aging.epi) <- 'Celltype'
+ct_marks <- FindAllMarkers(aging.epi, assay = 'RNA', return.thresh = 0.05)
 ct_marks <- ct_marks[ct_marks$p_val_adj<0.05,]
 ct_marks$linearFC <- logratio2foldchange(ct_marks$avg_log2FC)
 write.csv(ct_marks, file = 'Nature_scRNA_Aging_Figs/CelltypeMarkers.csv')
 heatmarkers <-ct_marks %>% group_by(cluster) %>% top_n(n = 15, wt = avg_log2FC) 
-Idents(aging.epi.clean) <- 'Celltype'
-avex <- AverageExpression(aging.epi.clean, assays = 'RNA', return.seurat = T)
-avex <- ScaleData(avex, features = heatmarkers$gene)
-p <- DoHeatmap(avex, features = heatmarkers$gene, label = F, slot = 'scale.data', draw.lines = F, assay = 'RNA', group.colors = c('blue','green','red'))+ scale_fill_gradientn(colors = c("blue", "white", "red"))
+Idents(aging.epi) <- 'Celltype'
+aging.epi <- ScaleData(aging.epi, features = heatmarkers$gene)
+p <- DoHeatmap(aging.epi, features = heatmarkers$gene, label = F, slot = 'scale.data', draw.lines = F, assay = 'RNA', group.colors = c('blue','green','red'))+ scale_fill_gradientn(colors = c("blue", "white", "red"))
 ggsave('Nature_scRNA_Aging_Figs/CelltypeMarkers_15.jpg',plot = p)
 ggsave('Nature_scRNA_Aging_Figs/CelltypeMarkers_15.eps',plot = p)
 
 ## Create a dotplot of known epithelial markers
 epimarks <- rev(c('Flg','Lor','Ivl','Krt4','Krt13','Krtdap','Mki67','Trp63','Sox2','Krt15','Krt14','Krt5'))
-aging.epi.clean$Named_Clusters <- factor(aging.epi.clean$Named_Clusters, levels = rev(levels(aging.epi.clean$Named_Clusters)))
-p <- DotPlot(aging.epi.clean, features = epimarks, group.by = 'Named_Clusters', assay = 'RNA', cols = c('blue','red'))+
+aging.epi$Named_Clusters <- factor(aging.epi$Named_Clusters, levels = rev(levels(aging.epi$Named_Clusters)))
+p <- DotPlot(aging.epi, features = epimarks, group.by = 'Named_Clusters', assay = 'RNA', cols = c('blue','red'))+
   RotatedAxis() + theme(text = element_text(size = 7.5))
 ggsave('Nature_scRNA_Aging_Figs/2A_KnownMarkersDotPlot.jpg',plot = p)
 ggsave('Nature_scRNA_Aging_Figs/2A_KnownMarkersDotPlot.eps',plot = p)
@@ -123,18 +99,17 @@ ggsave('Nature_scRNA_Aging_Figs/2A_KnownMarkersDotPlot.eps',plot = p)
 ## Attempt to see how the clusters would look like with cell cycle 
 ## regression 
 
-DefaultAssay(aging.epi.clean) <- 'RNA'
-obj.list <- SplitObject(aging.epi.clean, split.by = 'Mouse')
+DefaultAssay(aging.epi) <- 'RNA'
+obj.list <- SplitObject(aging.epi, split.by = 'Mouse')
 for(x in 1:length(obj.list)){
   y <- obj.list[[x]]
-  y <- NormalizeData(y)
-  y <- ScaleData(y, vars.to.regress = c('G2M.Score','S.Score'))
-  y <- FindVariableFeatures(y, selection.method = 'vst', nfeatures = 2000)
+  y <- SCTransform(y, vars.to.regress = c('G2M.Score','S.Score'))
   obj.list[[x]] <- y
 }
 ## Perform integration pipeline
 features.aging.reg <- SelectIntegrationFeatures(object.list = obj.list)
 save(features.aging.reg, file = 'features.aging.reg')
+obj.list <- PrepSCTIntegration(obj.list, anchor.features = features.aging.reg)
 anchors.aging.reg <- FindIntegrationAnchors(object.list = obj.list, anchor.features = features.aging.reg)
 save(anchors.aging, file = 'anchors.aging.reg')
 aging.reg <- IntegrateData(anchorset = anchors.aging.reg)
@@ -157,15 +132,15 @@ ggsave('Nature_scRNA_Aging_Figs/Clusters_CCRegress_Named.jpg', plot = p)
 ggsave('Nature_scRNA_Aging_Figs/Clusters_CCRegress_Named.eps', plot = p)
 
 ## Check out Stromal vs Epithelial genes
-DefaultAssay(aging.epi.clean) <- 'RNA'
+DefaultAssay(aging.epi) <- 'RNA'
 sve_df <- as.data.frame(read.csv('Nature_scRNA_Aging_Figs/Stroma_Epithelium_DEGs.csv'))
 sve_df <- sve_df[order(sve_df$log2FoldChange),]
 
 ## Find top expressed genes in the RNA assay
-aging.epi.clean <- NormalizeData(aging.epi.clean)
-epi.mat <- GetAssayData(aging.epi.clean, slot = 'data', assay = 'RNA')
+aging.epi <- NormalizeData(aging.epi)
+epi.mat <- GetAssayData(aging.epi, slot = 'data', assay = 'RNA')
 epi.genes <- rowSums(epi.mat)
-epi.genes <- epi.genes/ncol(aging.epi.clean)
+epi.genes <- epi.genes/ncol(aging.epi)
 epi.genes <- epi.genes[order(epi.genes,decreasing = T)]
 ranks <- c(1:length(epi.genes))
 rankdf <- as.data.frame(cbind(names(epi.genes),unname(epi.genes),ranks))
