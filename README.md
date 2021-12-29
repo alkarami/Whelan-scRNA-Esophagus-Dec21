@@ -2,7 +2,7 @@
 
 This repository contain R scripts used for the Whelan Lab publication on the single-cell biology of the murine epithelium.
 Please download the 10X FASTQ files or the processed .txt matrices from the GEO accession []. Alternatively, feel free to use 
-the Seurat R object aging.epi.clean.Robj, also provided in the GEO accession. 
+the Seurat R object aging.epi.Robj, also provided in the GEO accession. 
 
 The core dependencies for these scripts:
 1. **R 4.0** https://www.r-project.org/
