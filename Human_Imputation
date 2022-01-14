@@ -2,7 +2,7 @@
 library(biomaRt)
 library(Seurat)
 
-load('Nature_scRNA_Aging_Files/aging.epi.clean')
+load('Nature_scRNA_Aging_Files/aging.epi')
 fld <- readRDS('NE.rds')
 human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 
@@ -29,12 +29,10 @@ fld <- FindVariableFeatures(fld)
 fld <- ScaleData(fld, vars.to.regress = 'Sample')
 fld <- RunPCA(fld)
 
-load('Nature_scRNA_Aging_Files/aging.epi.clean')
-aec.copy <- aging.epi.clean
-DefaultAssay(aec.copy) <- 'integrated'
-trans.anchors <- FindTransferAnchors(reference = aec.copy,query = fld,dims = 1:30,
+DefaultAssay(aging.epi) <- 'integrated'
+trans.anchors <- FindTransferAnchors(reference = aging.epi,query = fld,dims = 1:30,
                                      reference.reduction = 'pca')
-TransferID <- TransferData(anchorset = trans.anchors, refdata = aec.copy$Named_Clusters)
+TransferID <- TransferData(anchorset = trans.anchors, refdata = aging.epi$Named_Clusters)
 fld <- AddMetaData(fld, metadata = TransferID)
 p <- DimPlot(fld, group.by = 'predicted.id', cols = kellycols[-1])
 ggsave('Nature_scRNA_Aging_Figs/Human_Clusters.jpg', plot = p)
@@ -51,11 +49,8 @@ library(reshape)
 cpt <- prop.table(table(fld$predicted.id, fld$Sample), margin = 2)
 cpt <- melt(cpt)
 cpt$Tissue <- rep('Human',nrow(cpt))
-cpt_b1 <- as.data.frame(cbind(rep('Basal-1',9),unique(fld$Sample),rep(0,9),rep('Human',9)))
 colnames(cpt) <- c('Cluster','Sample','Proportion','Tissue')
-colnames(cpt_b1) <- c('Cluster','Sample','Proportion','Tissue')
-cpt <- rbind(cpt,cpt_b1)
-cpt.mouse <- prop.table(table(aec.copy$Named_Clusters, aec.copy$orig.ident), margin = 2)
+cpt.mouse <- prop.table(table(aging.epi$Named_Clusters, aging.epi$orig.ident), margin = 2)
 cpt.mouse <- melt(cpt.mouse)
 cpt.mouse$Tissue <- rep('Mouse',nrow(cpt.mouse))
 colnames(cpt.mouse) <- c('Cluster','Sample','Proportion','Tissue')
