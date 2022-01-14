@@ -13,8 +13,7 @@ cpt$Age <- c(rep('Aged',253),rep('Young',nrow(cpt)-253))
 cpt$Age <- factor(cpt$Age, levels = c('Young','Aged'))
 colnames(cpt) <- c('Cluster','Sample','Proportion','Age')
 cpt <- cpt[!cpt$Cluster %in% c(11,12),]
-cpt$Cluster <- factor(cpt$Cluster, levels = c('Basal-1','Basal-2','Basal-3','Basal-4','Basal-5','Basal-6', 'Intermediate','Superficial-1','Superficial-2','Superficial-3','Superficial-4'))
-cpt$Cluster <- revalue(cpt$Cluster, replace = c('Intermediate' = 'Suprabasal'))
+cpt$Cluster <- factor(cpt$Cluster, levels = c('Basal-1','Basal-2','Basal-3','Basal-4','Basal-5','Basal-6', 'Suprabasal','Superficial-1','Superficial-2','Superficial-3','Superficial-4'))
 
 p <- ggboxplot(cpt, x = "Age", y = "Proportion",color = "Age", add = 'jitter', palette = 'lancet', repel = T)+
   stat_compare_means(label.y = 0.18, size = 2)+ 
@@ -44,7 +43,6 @@ ggsave('Nature_scRNA_Aging_Figs/Clusters_Colored_Combined.eps', plot = p)
 ## Final version of the cluster markers figure
 epi.markers <- as.data.frame(read.csv('Nature_scRNA_Aging_Figs/EpiOnly_ClusterMarkers.csv', header = T, row.names = 1))
 heatmarkers <- epi.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC) 
-heatmarkers <- heatmarkers[!(heatmarkers$cluster %in% c(11,12)),]
 aging.epi <- ScaleData(aging.epi, features = heatmarkers$gene)
 p <- DoHeatmap(aging.epi, features = heatmarkers$gene, label = F,
                slot = 'scale.data', draw.lines = F, assay = 'RNA', group.colors = kellycols)+
