@@ -19,14 +19,14 @@ for(x in list.files('Organoid_scRNA', full.names = T)){
     if(grepl("neg",z,ignore.case = T)){cytoid <- append(cytoid,"Neg")} else{if(grepl("pos",z,ignore.case = T)){cytoid <- append(cytoid, "Pos")} else{cytoid <- append(cytoid,"Unsorted")}}
    }
   y$CytoID <- cytoid
-  y <- NormalizeData(y)
-  y <- FindVariableFeatures(y)
+  y <- SCTransform(y)
   print(paste(ncol(y),'cells','in',pname,sep = ' '))
   org.files <- append(org.files,y)
 }
 
 ## Perform integration pipeline
 features.org <- SelectIntegrationFeatures(object.list = org.files)
+org.files <- PrepSCTIntegration(object.list = org.files, anchor.features = features.org)
 anchors.org <- FindIntegrationAnchors(object.list = org.files, anchor.features = features.org)
 org.combined <- IntegrateData(anchorset = anchors.org)
 
@@ -34,18 +34,18 @@ DefaultAssay(org.combined) <- "integrated"
 
 org.combined <- ScaleData(org.combined, verbose = FALSE)
 org.combined <- RunPCA(org.combined, npcs = 30, verbose = FALSE)
-org.combined <- RunUMAP(org.combined, reduction = "pca", dims = 1:20)
-org.combined <- FindNeighbors(org.combined, reduction = "pca", dims = 1:20)
+org.combined <- RunUMAP(org.combined, reduction = "pca", dims = 1:30)
+org.combined <- FindNeighbors(org.combined, reduction = "pca", dims = 1:30)
 org.combined <- FindClusters(org.combined, resolution = 0.5)
 save(org.combined, file = 'Nature_scRNA_Aging_Files/org.combined')
 
 load('Nature_scRNA_Aging_Files/org.combined')
 DefaultAssay(org.combined) <- 'integrated'
-load('Nature_scRNA_Aging_Files/aging.epi.clean')
-DefaultAssay(aging.epi.clean) <- 'integrated'
-trans.anchors <- FindTransferAnchors(reference = aging.epi.clean,query = org.combined,dims = 1:30,
+load('Nature_scRNA_Aging_Files/aging.epi')
+DefaultAssay(aging.epi) <- 'integrated'
+trans.anchors <- FindTransferAnchors(reference = aging.epi,query = org.combined,dims = 1:30,
                                reference.reduction = 'pca')
-TransferID <- TransferData(anchorset = trans.anchors, refdata = aging.epi.clean$Named_Clusters)
+TransferID <- TransferData(anchorset = trans.anchors, refdata = aging.epi$Named_Clusters)
 org.combined <- AddMetaData(org.combined, metadata = TransferID)
 
 kellycols <- c('#AEA200','#00A6FF','yellow','#8B93FF','#00BD5C','#F8766D','orange','black','pink','purple','red')
@@ -59,13 +59,12 @@ cpt <- prop.table(table(org.combined$predicted.id, org.combined$orig.ident), mar
 cpt <- melt(cpt)
 cpt$Tissue <- rep('Organoid',nrow(cpt))
 colnames(cpt) <- c('Cluster','Sample','Proportion','Tissue')
-cpt.mouse <- prop.table(table(aging.epi.clean$Named_Clusters, aging.epi.clean$orig.ident), margin = 2)
+cpt.mouse <- prop.table(table(aging.epi$Named_Clusters, aging.epi$orig.ident), margin = 2)
 cpt.mouse <- melt(cpt.mouse)
 cpt.mouse$Tissue <- rep('Epithelium',nrow(cpt.mouse))
 colnames(cpt.mouse) <- c('Cluster','Sample','Proportion','Tissue')
 cpt <- rbind(cpt,cpt.mouse)
 cpt$Tissue <- factor(cpt$Tissue, levels = c('Epithelium','Organoid'))
-cpt$Cluster <- revalue(cpt$Cluster, replace = c('Intermediate'='Suprabasal'))
 
 p <- ggboxplot(cpt, x = "Tissue", y = "Proportion",color = "Tissue",
                add = 'jitter', palette = 'lancet', repel = T, 
@@ -94,11 +93,9 @@ ggsave('Nature_scRNA_Aging_Figs/Org_PSM.jpg', plot = p)
 ggsave('Nature_scRNA_Aging_Figs/Org_PSM.eps', plot = p)
 
 ## Compare similar clusters
-Idents(aging.epi.clean) <- 'Age'
-aec.ds <- subset(aging.epi.clean, downsample = 2500)
-Idents(org.combined) <- 'CytoID'
-org.ds <- subset(org.combined, downsample = 5000)
-org.ds <- subset(org.ds, idents = 'Unsorted')
+Idents(aging.epi) <- 'Age'
+aec.ds <- subset(aging.epi, downsample = 2500)
+org.ds <- org.combined[, sample(colnames(org.combined), size =5000, replace=F)]
 org.ds$Named_Clusters <- org.ds$predicted.id
 aec.ds$Tissue <- rep('Epithelium', ncol(aec.ds))
 org.ds$Tissue <- rep('Organoid', ncol(org.ds))
@@ -163,15 +160,7 @@ ggsave('Nature_scRNA_Aging_Figs/Org_ClusterVS.jpg', plot = p)
 ggsave('Nature_scRNA_Aging_Figs/Org_ClusterVS.eps', plot = p)
 
 ## Perform pseudotime with Monocle 3. Downsample for less computational pressure
-Idents(aging.epi.clean) <- 'Age'
-aec.ds <- subset(aging.epi.clean, downsample = 5000)
-org.ds <- subset(org.combined, downsample = 5000)
-org.ds$Named_Clusters <- org.ds$predicted.id
-aec.ds$Tissue <- rep('Epithelium', ncol(aec.ds))
-org.ds$Tissue <- rep('Organoid', ncol(org.ds))
-org.ds$Age <- rep('Organoid', ncol(org.ds))
-combined.ds <- merge(aec.ds,org.ds)
-exmat <- GetAssayData(combined.ds, slot = 'counts', assay = 'RNA')
+exmat <- GetAssayData(combined.ds, slot = 'counts', assay = 'SCT')
 mdat <- as.data.frame(cbind(combined.ds$nCount_RNA,combined.ds$nFeature_RNA,
                             combined.ds$Age, combined.ds$percent.mt,
                             combined.ds$Sex, combined.ds$Phase, 
