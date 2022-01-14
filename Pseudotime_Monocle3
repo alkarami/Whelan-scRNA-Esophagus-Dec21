@@ -3,23 +3,23 @@ library(Seurat)
 library(dplyr)
 library(ggplot2)
 
-load('Nature_scRNA_Aging_Files/aging.epi.clean')
-exmat <- GetAssayData(aging.epi.clean, slot = 'counts', assay = 'RNA')
-mdat <- as.data.frame(cbind(aging.epi.clean$nCount_RNA,aging.epi.clean$nFeature_RNA,
-                            aging.epi.clean$Age, aging.epi.clean$percent.mt,
-                            aging.epi.clean$Sex, aging.epi.clean$Phase, 
-                            aging.epi.clean$Named_Clusters,
-                            aging.epi.clean$Celltype,
-                            aging.epi.clean$orig.ident,
-                            aging.epi.clean$Mouse))
+load('Nature_scRNA_Aging_Files/aging.epi')
+exmat <- GetAssayData(aging.epi, slot = 'counts', assay = 'SCT')
+mdat <- as.data.frame(cbind(aging.epi$nCount_RNA,aging.epi$nFeature_RNA,
+                            aging.epi$Age, aging.epi$percent.mt,
+                            aging.epi$Sex, aging.epi$Phase, 
+                            aging.epi$Named_Clusters,
+                            aging.epi$Celltype,
+                            aging.epi$orig.ident,
+                            aging.epi$Mouse))
 colnames(mdat) <- c('nCount_RNA','nFeature_RNA','Age','percent.mt','Sex',
                     'Phase','Named_Clusters','Celltype','orig.ident','Mouse')
-DefaultAssay(aging.epi.clean) <- 'RNA'
-genedf <- cbind(rownames(aging.epi.clean),rownames(aging.epi.clean),rownames(aging.epi.clean))
+DefaultAssay(aging.epi) <- 'SCT'
+genedf <- cbind(rownames(aging.epi),rownames(aging.epi),rownames(aging.epi))
 rownames(genedf) <- genedf[,1]
 genedf <- genedf[,-1]
 colnames(genedf) <- c('gene_short_name','gene_name')
-rm(aging.epi.clean)
+rm(aging.epi)
 
 ## Start M3 workflow
 aging.m3 <- new_cell_data_set(exmat,cell_metadata = mdat,
